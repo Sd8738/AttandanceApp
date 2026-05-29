@@ -5,11 +5,9 @@ import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, getDoc } 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getCurrentPosition } from '../utils/geo';
 import * as XLSX from 'xlsx';
-
 function TeacherDashboard({ user }) {
   const navigate = useNavigate();
   const currentUser = user || JSON.parse(localStorage.getItem('user') || 'null');
-
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [filteredRecords, setFilteredRecords] = useState([]);
   const [divisions, setDivisions] = useState([]);
@@ -35,18 +33,15 @@ function TeacherDashboard({ user }) {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [analyticsData, setAnalyticsData] = useState([]);
   const [exportingExcel, setExportingExcel] = useState(false);
-
   // Advanced Export States
   const [exportClass, setExportClass] = useState('');
   const [exportDivision, setExportDivision] = useState('');
   const [exportRangeType, setExportRangeType] = useState('semester');
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
-
   // Location Verification Settings
   const [enableLocationCheck, setEnableLocationCheck] = useState(true);
   const [allowedRadius, setAllowedRadius] = useState(100);
-
   useEffect(() => {
     if (!currentUser) {
       navigate('/');
@@ -55,12 +50,10 @@ function TeacherDashboard({ user }) {
     fetchTeacherData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
-
   useEffect(() => {
     applyFilters();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attendanceRecords, searchStudent, filterDivision, filterClass, filterDate, filterLecture]);
-
   const fetchTeacherData = async () => {
     setLoading(true);
     setErrorMessage('');
@@ -69,7 +62,6 @@ function TeacherDashboard({ user }) {
       if (!currentUser.id) {
         throw new Error('Teacher ID not found');
       }
-
       const teacherDoc = await getDoc(doc(db, 'teachers', currentUser.id));
       if (teacherDoc.exists()) {
         const data = teacherDoc.data();
@@ -78,7 +70,6 @@ function TeacherDashboard({ user }) {
         setAttendanceEnabled(data.attendanceEnabled || false);
         setCurrentLecture(data.currentLecture || null);
       }
-
       const q = query(
         collection(db, 'attendance'),
         where('teacherId', '==', currentUser.id)
@@ -98,38 +89,30 @@ function TeacherDashboard({ user }) {
       setLoading(false);
     }
   };
-
   const applyFilters = () => {
     let filtered = [...attendanceRecords];
-
     if (searchStudent) {
       filtered = filtered.filter(r => 
         r.studentName.toLowerCase().includes(searchStudent.toLowerCase()) ||
         r.studentPRN.toLowerCase().includes(searchStudent.toLowerCase())
       );
     }
-
     if (filterDivision) {
       filtered = filtered.filter(r => r.division === filterDivision);
     }
-
     if (filterClass) {
       filtered = filtered.filter(r => r.class === filterClass);
     }
-
     if (filterDate) {
       filtered = filtered.filter(r => r.lectureDate === filterDate);
     }
-
     if (filterLecture) {
       filtered = filtered.filter(r => 
         r.lectureNumber.toLowerCase().includes(filterLecture.toLowerCase())
       );
     }
-
     setFilteredRecords(filtered);
   };
-
   const generateAnalytics = (records) => {
     const dateGroups = {};
     records.forEach(record => {
@@ -140,7 +123,6 @@ function TeacherDashboard({ user }) {
       }
       dateGroups[date]++;
     });
-
     const analytics = Object.keys(dateGroups)
       .map(date => ({
         date,
@@ -148,10 +130,8 @@ function TeacherDashboard({ user }) {
       }))
       .sort((a, b) => new Date(a.date) - new Date(b.date))
       .slice(-7);
-
     setAnalyticsData(analytics);
   };
-
   const handleToggleAttendance = () => {
     if (attendanceEnabled) {
       disableAttendance();
@@ -159,16 +139,21 @@ function TeacherDashboard({ user }) {
       setShowLectureForm(true);
     }
   };
-
   const enableAttendance = async () => {
     if (!lectureNumber || !lectureDate) {
       setErrorMessage('Please enter lecture number and date.');
       return;
     }
-
     try {
+      // 📍 Capture teacher's real-time location for anti-spoof distance check
       // 📍 Capture teacher's real-time location for anti-spoof distance check if enabled
       let teacherLocation = null;
+      try {
+        teacherLocation = await getCurrentPosition();
+        setSuccessMessage('📍 Location captured. Enabling attendance...');
+      } catch (locErr) {
+        console.warn('Could not capture teacher location:', locErr.message);
+        setSuccessMessage('⚠️ Location unavailable — students won\'t be distance-verified.');
       if (enableLocationCheck) {
         try {
           teacherLocation = await getCurrentPosition();
@@ -178,14 +163,13 @@ function TeacherDashboard({ user }) {
           setSuccessMessage('⚠️ Location unavailable — students won\'t be distance-verified.');
         }
       }
-
       const lectureData = {
         number: lectureNumber,
         date: lectureDate,
         teacherLocation: teacherLocation || null,
+        allowedRadiusMeters: 50
         allowedRadiusMeters: enableLocationCheck ? allowedRadius : 999999
       };
-
       await updateDoc(doc(db, 'teachers', currentUser.id), {
         attendanceEnabled: true,
         currentLecture: lectureData
@@ -196,6 +180,7 @@ function TeacherDashboard({ user }) {
       setShowLectureForm(false);
       setLectureNumber('');
       setLectureDate(new Date().toISOString().split('T')[0]);
+      setSuccessMessage('✅ Attendance enabled' + (teacherLocation ? ' with location security!' : ' (no location)'));
       setSuccessMessage('✅ Attendance enabled' + (teacherLocation ? ` with location security (radius: ${allowedRadius}m)!` : ' (no distance check)'));
       setTimeout(() => setSuccessMessage(''), 4000);
     } catch (error) {
@@ -203,7 +188,6 @@ function TeacherDashboard({ user }) {
       setErrorMessage('Failed to enable attendance: ' + error.message);
     }
   };
-
   const disableAttendance = async () => {
     try {
       await updateDoc(doc(db, 'teachers', currentUser.id), {
@@ -220,12 +204,10 @@ function TeacherDashboard({ user }) {
       setErrorMessage('Failed to disable attendance: ' + error.message);
     }
   };
-
   const removeAttendance = async (attendanceId) => {
     if (!window.confirm('Are you sure you want to remove this attendance record?')) {
       return;
     }
-
     try {
       await deleteDoc(doc(db, 'attendance', attendanceId));
       setSuccessMessage('Attendance removed successfully!');
@@ -236,11 +218,9 @@ function TeacherDashboard({ user }) {
       setErrorMessage('Failed to remove attendance: ' + error.message);
     }
   };
-
   const viewStudentProgress = (studentPRN) => {
     const studentRecords = attendanceRecords.filter(r => r.studentPRN === studentPRN);
     if (studentRecords.length === 0) return;
-
     setSelectedStudent({
       prn: studentPRN,
       name: studentRecords[0].studentName,
@@ -249,28 +229,20 @@ function TeacherDashboard({ user }) {
       percentage: Math.round((studentRecords.length / 60) * 100)
     });
   };
-
   const getAttendanceLink = (division) => {
-    let origin = window.location.origin;
-    if (origin.startsWith('http://') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
-      origin = origin.replace('http://', 'https://');
-    }
-    return `${origin}/attendance/${currentUser.id}/${division}`;
+    return `${window.location.origin}/attendance/${currentUser.id}/${division}`;
   };
-
   const copyLink = (division) => {
     const link = getAttendanceLink(division);
     navigator.clipboard.writeText(link);
     setSuccessMessage(`Link copied for Division ${division}!`);
     setTimeout(() => setSuccessMessage(''), 3000);
   };
-
   const handleLogout = () => {
     localStorage.removeItem('user');
     navigate('/', { replace: true });
     window.location.reload();
   };
-
   const clearFilters = () => {
     setSearchStudent('');
     setFilterDivision('');
@@ -278,13 +250,11 @@ function TeacherDashboard({ user }) {
     setFilterDate('');
     setFilterLecture('');
   };
-
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return 'N/A';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     return date.toLocaleString();
   };
-
   // 📊 EXCEL EXPORT FUNCTION
   const exportToExcel = () => {
     setExportingExcel(true);
@@ -304,12 +274,10 @@ function TeacherDashboard({ user }) {
         'Teacher': record.teacherName,
         'Location': record.location ? `${record.location.latitude.toFixed(4)}, ${record.location.longitude.toFixed(4)}` : 'N/A'
       }));
-
       // Create workbook and worksheet
       const worksheet = XLSX.utils.json_to_sheet(excelData);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Attendance');
-
       // Set column widths
       const columnWidths = [
         { wch: 8 },  // Sr. No.
@@ -325,14 +293,11 @@ function TeacherDashboard({ user }) {
         { wch: 25 }  // Location
       ];
       worksheet['!cols'] = columnWidths;
-
       // Generate filename with current date and teacher name
       const today = new Date().toISOString().split('T')[0];
       const filename = `Attendance_${currentUser.name.replace(/\s+/g, '_')}_${today}.xlsx`;
-
       // Download
       XLSX.writeFile(workbook, filename);
-
       setSuccessMessage(`✅ Excel file downloaded: ${filename}`);
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error) {
@@ -342,7 +307,6 @@ function TeacherDashboard({ user }) {
       setExportingExcel(false);
     }
   };
-
   // Export filtered or all records
   const exportCurrentView = () => {
     if (filteredRecords.length === 0) {
@@ -352,7 +316,6 @@ function TeacherDashboard({ user }) {
     }
     exportToExcel();
   };
-
   // 📊 ADVANCED STRUCTURED EXCEL EXPORT (Entire Semester or Custom Date Range)
   const exportStructuredExcel = async () => {
     if (!exportClass || !exportDivision) {
@@ -360,17 +323,14 @@ function TeacherDashboard({ user }) {
       setTimeout(() => setErrorMessage(''), 4000);
       return;
     }
-
     if (exportRangeType === 'custom' && (!exportStartDate || !exportEndDate)) {
       setErrorMessage('⚠️ Please select both Start Date and End Date for custom date range.');
       setTimeout(() => setErrorMessage(''), 4000);
       return;
     }
-
     setExportingExcel(true);
     setErrorMessage('');
     setSuccessMessage('');
-
     try {
       // 1. Fetch students for the selected class and division
       const studentConstraints = [
@@ -386,24 +346,19 @@ function TeacherDashboard({ user }) {
       snapshot.forEach(docSnap => {
         classStudents.push({ id: docSnap.id, ...docSnap.data() });
       });
-
       if (classStudents.length === 0) {
         throw new Error(`No students found registered in Class ${exportClass}, Division ${exportDivision}.`);
       }
-
       // Sort students alphabetically by name to assign sequential serial/roll numbers
       classStudents.sort((a, b) => a.name.localeCompare(b.name));
-
       // 2. Filter attendance records for this class & division & teacher & date range
       let records = attendanceRecords.filter(r => 
         r.class === exportClass && 
         r.division === exportDivision
       );
-
       if (exportRangeType === 'custom') {
         records = records.filter(r => r.lectureDate >= exportStartDate && r.lectureDate <= exportEndDate);
       }
-
       // 3. Identify all unique lectures
       const lectureMap = {};
       records.forEach(r => {
@@ -416,13 +371,11 @@ function TeacherDashboard({ user }) {
           };
         }
       });
-
       // Sort lectures chronologically
       const sortedLectures = Object.values(lectureMap).sort((a, b) => {
         if (a.date !== b.date) return a.date.localeCompare(b.date);
         return a.number.localeCompare(b.number);
       });
-
       // 4. Construct Excel Rows
       const excelRows = classStudents.map((student, idx) => {
         // Roll No (1-based index) | PRN No. | Student Name
@@ -431,36 +384,29 @@ function TeacherDashboard({ user }) {
           'PRN No.': student.prn,
           'Student Name': student.name
         };
-
         let attendedCount = 0;
-
         sortedLectures.forEach(lecture => {
           // Check if this student was present for this lecture
           const wasPresent = records.some(r => 
             r.studentPRN === student.prn && 
             `${r.lectureDate}_${r.lectureNumber || 'N/A'}` === lecture.key
           );
-
           // Header format: e.g. "04/05/26 (Lecture 1)"
           const colHeader = `${lecture.date} (${lecture.number})`;
           row[colHeader] = wasPresent ? 'P' : 'A';
           if (wasPresent) attendedCount++;
         });
-
         // Add summary columns
         row['Lectures Attended'] = attendedCount;
         row['Attendance %'] = sortedLectures.length > 0 
           ? `${Math.round((attendedCount / sortedLectures.length) * 100)}%` 
           : '0%';
-
         return row;
       });
-
       // Create Workbook and Worksheet
       const worksheet = XLSX.utils.json_to_sheet(excelRows);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Attendance Report');
-
       // Autofit column widths
       const columnWidths = [
         { wch: 10 }, // Roll No.
@@ -473,14 +419,11 @@ function TeacherDashboard({ user }) {
       columnWidths.push({ wch: 18 }); // Lectures Attended
       columnWidths.push({ wch: 15 }); // Attendance %
       worksheet['!cols'] = columnWidths;
-
       // File Name creation
       const rangeStr = exportRangeType === 'custom' ? `${exportStartDate}_to_${exportEndDate}` : 'Semester';
       const filename = `Attendance_Report_${exportClass}_Div_${exportDivision}_${rangeStr}.xlsx`;
-
       // Write and download
       XLSX.writeFile(workbook, filename);
-
       setSuccessMessage(`✅ Advanced Excel report downloaded: ${filename}`);
       setTimeout(() => setSuccessMessage(''), 5000);
     } catch (error) {
@@ -491,7 +434,6 @@ function TeacherDashboard({ user }) {
       setExportingExcel(false);
     }
   };
-
   if (loading) {
     return (
       <div className="gradient-bg">
@@ -499,7 +441,6 @@ function TeacherDashboard({ user }) {
       </div>
     );
   }
-
   return (
     <div className="gradient-bg">
       <div className="container">
@@ -512,10 +453,8 @@ function TeacherDashboard({ user }) {
             <button onClick={handleLogout} className="btn btn-danger">Logout</button>
           </div>
         </div>
-
         {errorMessage && <div className="alert alert-error">{errorMessage}</div>}
         {successMessage && <div className="alert alert-success">{successMessage}</div>}
-
         <div className="stats-grid">
           <div className="stat-card">
             <h3>Total Records</h3>
@@ -541,7 +480,6 @@ function TeacherDashboard({ user }) {
             <div className="stat-value">{filteredRecords.length}</div>
           </div>
         </div>
-
         <div className="card">
           <h3>📡 Attendance Control</h3>
           <div style={{ marginTop: '20px' }}>
@@ -553,7 +491,6 @@ function TeacherDashboard({ user }) {
               {attendanceEnabled ? '🔴 Disable Attendance' : '🟢 Enable Attendance'}
             </button>
           </div>
-
           {currentLecture && attendanceEnabled && (
             <div style={{ marginTop: '20px', padding: '15px', background: '#e8f5e9', borderRadius: '10px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
@@ -568,7 +505,6 @@ function TeacherDashboard({ user }) {
               </div>
             </div>
           )}
-
           {showLectureForm && (
             <div className="card" style={{ marginTop: '20px', background: '#f5f5f5' }}>
               <h4>Set Lecture Details</h4>
@@ -589,7 +525,6 @@ function TeacherDashboard({ user }) {
                   onChange={(e) => setLectureDate(e.target.value)}
                 />
               </div>
-
               <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
                 <input
                   type="checkbox"
@@ -602,7 +537,6 @@ function TeacherDashboard({ user }) {
                   Enable GPS Location Security (Anti-Spoof Check)
                 </label>
               </div>
-
               {enableLocationCheck && (
                 <div className="form-group" style={{ marginTop: '10px' }}>
                   <label>Allowed Student Distance Radius (accuracy margin):</label>
@@ -617,7 +551,6 @@ function TeacherDashboard({ user }) {
                   </select>
                 </div>
               )}
-
               <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
                 <button onClick={enableAttendance} className="btn btn-success">
                   Confirm & Enable
@@ -628,7 +561,6 @@ function TeacherDashboard({ user }) {
               </div>
             </div>
           )}
-
           {divisions.length > 0 && (
             <div style={{ marginTop: '30px' }}>
               <h4>📎 Division Attendance Links</h4>
@@ -644,7 +576,6 @@ function TeacherDashboard({ user }) {
             </div>
           )}
         </div>
-
         <div className="card" style={{ background: '#f0f4ff', borderLeft: '5px solid #667eea' }}>
           <h3>📥 Advanced Attendance Sheet Export</h3>
           <p style={{ color: '#666', fontSize: '14px', marginBottom: '20px' }}>
@@ -659,7 +590,6 @@ function TeacherDashboard({ user }) {
                 {classes.map(cls => <option key={cls} value={cls}>{cls}</option>)}
               </select>
             </div>
-
             <div className="form-group">
               <label>Select Division *</label>
               <select value={exportDivision} onChange={(e) => setExportDivision(e.target.value)}>
@@ -667,7 +597,6 @@ function TeacherDashboard({ user }) {
                 {divisions.map(div => <option key={div} value={div}>Division {div}</option>)}
               </select>
             </div>
-
             <div className="form-group" style={{ gridColumn: 'span 2' }}>
               <label>Export Range</label>
               <div style={{ display: 'flex', gap: '20px', marginTop: '10px' }}>
@@ -695,7 +624,6 @@ function TeacherDashboard({ user }) {
                 </label>
               </div>
             </div>
-
             {exportRangeType === 'custom' && (
               <>
                 <div className="form-group">
@@ -717,7 +645,6 @@ function TeacherDashboard({ user }) {
               </>
             )}
           </div>
-
           <button 
             onClick={exportStructuredExcel}
             className="btn btn-success"
@@ -728,7 +655,6 @@ function TeacherDashboard({ user }) {
             <span>{exportingExcel ? 'Generating Report...' : 'Generate & Download Excel Sheet'}</span>
           </button>
         </div>
-
         <div className="card">
           <h3>📊 Attendance Analytics (Last 7 Days)</h3>
           <ResponsiveContainer width="100%" height={300}>
@@ -742,7 +668,6 @@ function TeacherDashboard({ user }) {
             </LineChart>
           </ResponsiveContainer>
         </div>
-
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
             <h3 style={{ margin: 0 }}>🔍 Filter Attendance Records</h3>
@@ -793,7 +718,6 @@ function TeacherDashboard({ user }) {
             }
           </p>
         </div>
-
         <div className="card">
           <h3>📋 Attendance Records ({filteredRecords.length})</h3>
           {filteredRecords.length === 0 ? (
@@ -837,7 +761,6 @@ function TeacherDashboard({ user }) {
             </div>
           )}
         </div>
-
         {selectedStudent && (
           <div className="card" style={{ background: '#e3f2fd' }}>
             <h3>📊 Student Progress: {selectedStudent.name}</h3>
@@ -881,5 +804,4 @@ function TeacherDashboard({ user }) {
     </div>
   );
 }
-
 export default TeacherDashboard;
