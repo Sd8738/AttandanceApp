@@ -29,6 +29,15 @@ function sendNotification(title, body, icon = '/icon-192.png') {
 }
 
 // ─── Helper: face detection (face-api.js loaded via CDN as window.faceapi) ────
+async function waitForFaceAPI(timeoutMs = 3000) {
+  const start = Date.now();
+  while (typeof window.faceapi === 'undefined') {
+    if (Date.now() - start > timeoutMs) return false;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return true;
+}
+
 async function detectFace(videoElement) {
   if (typeof window.faceapi === 'undefined') return null;
   try {
@@ -43,13 +52,22 @@ async function detectFace(videoElement) {
 }
 
 async function loadFaceModels() {
-  if (typeof window.faceapi === 'undefined') return false;
+  const apiLoaded = await waitForFaceAPI(3000);
+  if (!apiLoaded) {
+    console.warn('FaceAPI script not available.');
+    return false;
+  }
   const MODEL_URL = '/models';
   try {
-    await window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    // Race face-api load with a 3s timeout
+    const loadPromise = window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Model load timeout')), 3000)
+    );
+    await Promise.race([loadPromise, timeoutPromise]);
     return true;
   } catch (err) {
-    console.warn('Face model load error:', err);
+    console.warn('Face model load bypassed/failed:', err);
     return false;
   }
 }
@@ -98,14 +116,17 @@ function StudentDashboard({ user }) {
     if (!currentUser) { navigate('/'); return; }
 
     requestNotificationPermission();
-    getStudentLocation();
     loadFaceModels().then(loaded => {
       setFaceModelsLoaded(loaded);
       if (loaded) setFaceStatus('✅ Face detection ready');
       else setFaceStatus('⚠️ Face detection unavailable (CDN error)');
     });
 
-    if (teacherId) fetchTeacherInfo();
+    if (teacherId) {
+      fetchTeacherInfo();
+    } else {
+      getStudentLocation();
+    }
     fetchAttendanceHistory();
 
     // Sync any offline queue on mount if online
@@ -138,8 +159,16 @@ function StudentDashboard({ user }) {
           setLoading(false);
           return;
         }
-        if (data.currentLecture) setLectureInfo(data.currentLecture);
-        else setErrorMessage('No active lecture session.');
+        if (data.currentLecture) {
+          setLectureInfo(data.currentLecture);
+          if (data.currentLecture.teacherLocation) {
+            getStudentLocation();
+          } else {
+            setLocationStatus('📍 Location check disabled');
+          }
+        } else {
+          setErrorMessage('No active lecture session.');
+        }
 
         // Smart notification — active lecture reminder
         sendNotification(
@@ -230,14 +259,25 @@ function StudentDashboard({ user }) {
     // ── STEP 1: Face Liveness Detection ─────────────────────────────────────
     if (faceModelsLoaded && webcamRef.current?.video) {
       setFaceStatus('🔍 Detecting face...');
-      const detection = await detectFace(webcamRef.current.video);
-      if (!detection) {
-        setFaceStatus('❌ No face detected');
-        setErrorMessage('🧠 Face not detected! Please look at the camera clearly.');
-        setLoading(false);
-        return;
+      
+      const detectPromise = detectFace(webcamRef.current.video);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Face detection timeout')), 4000)
+      );
+
+      try {
+        const detection = await Promise.race([detectPromise, timeoutPromise]);
+        if (!detection) {
+          setFaceStatus('❌ No face detected');
+          setErrorMessage('🧠 Face not detected! Please look at the camera clearly.');
+          setLoading(false);
+          return;
+        }
+        setFaceStatus('✅ Face verified');
+      } catch (err) {
+        console.warn('Face detection timed out or failed:', err);
+        setFaceStatus('⚠️ Face verification bypassed (timeout)');
       }
-      setFaceStatus('✅ Face verified');
     }
 
     // ── STEP 2: Location / Anti-Spoof Check ─────────────────────────────────
@@ -397,6 +437,14 @@ function StudentDashboard({ user }) {
               height={240}
               videoConstraints={{ width: 320, height: 240, facingMode: 'user' }}
               style={{ borderRadius: '15px' }}
+              onUserMedia={() => {
+                if (faceModelsLoaded) setFaceStatus('✅ Face detection ready');
+                else setFaceStatus('📷 Camera active');
+              }}
+              onUserMediaError={(err) => {
+                console.error('Camera access error:', err);
+                setErrorMessage('📷 Camera access denied or unavailable. Please ensure camera permissions are granted in your browser settings. Note: Camera access requires a secure connection (HTTPS or localhost).');
+              }}
             />
           </div>
 

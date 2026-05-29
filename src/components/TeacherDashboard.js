@@ -43,6 +43,10 @@ function TeacherDashboard({ user }) {
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
 
+  // Location Verification Settings
+  const [enableLocationCheck, setEnableLocationCheck] = useState(true);
+  const [allowedRadius, setAllowedRadius] = useState(100);
+
   useEffect(() => {
     if (!currentUser) {
       navigate('/');
@@ -163,21 +167,23 @@ function TeacherDashboard({ user }) {
     }
 
     try {
-      // 📍 Capture teacher's real-time location for anti-spoof distance check
+      // 📍 Capture teacher's real-time location for anti-spoof distance check if enabled
       let teacherLocation = null;
-      try {
-        teacherLocation = await getCurrentPosition();
-        setSuccessMessage('📍 Location captured. Enabling attendance...');
-      } catch (locErr) {
-        console.warn('Could not capture teacher location:', locErr.message);
-        setSuccessMessage('⚠️ Location unavailable — students won\'t be distance-verified.');
+      if (enableLocationCheck) {
+        try {
+          teacherLocation = await getCurrentPosition();
+          setSuccessMessage('📍 Location captured. Enabling attendance...');
+        } catch (locErr) {
+          console.warn('Could not capture teacher location:', locErr.message);
+          setSuccessMessage('⚠️ Location unavailable — students won\'t be distance-verified.');
+        }
       }
 
       const lectureData = {
         number: lectureNumber,
         date: lectureDate,
         teacherLocation: teacherLocation || null,
-        allowedRadiusMeters: 50
+        allowedRadiusMeters: enableLocationCheck ? allowedRadius : 999999
       };
 
       await updateDoc(doc(db, 'teachers', currentUser.id), {
@@ -190,7 +196,7 @@ function TeacherDashboard({ user }) {
       setShowLectureForm(false);
       setLectureNumber('');
       setLectureDate(new Date().toISOString().split('T')[0]);
-      setSuccessMessage('✅ Attendance enabled' + (teacherLocation ? ' with location security!' : ' (no location)'));
+      setSuccessMessage('✅ Attendance enabled' + (teacherLocation ? ` with location security (radius: ${allowedRadius}m)!` : ' (no distance check)'));
       setTimeout(() => setSuccessMessage(''), 4000);
     } catch (error) {
       console.error('Error enabling attendance:', error);
@@ -245,7 +251,11 @@ function TeacherDashboard({ user }) {
   };
 
   const getAttendanceLink = (division) => {
-    return `${window.location.origin}/attendance/${currentUser.id}/${division}`;
+    let origin = window.location.origin;
+    if (origin.startsWith('http://') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+      origin = origin.replace('http://', 'https://');
+    }
+    return `${origin}/attendance/${currentUser.id}/${division}`;
   };
 
   const copyLink = (division) => {
@@ -579,6 +589,35 @@ function TeacherDashboard({ user }) {
                   onChange={(e) => setLectureDate(e.target.value)}
                 />
               </div>
+
+              <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
+                <input
+                  type="checkbox"
+                  id="enableLocationCheck"
+                  checked={enableLocationCheck}
+                  onChange={(e) => setEnableLocationCheck(e.target.checked)}
+                  style={{ width: 'auto', cursor: 'pointer' }}
+                />
+                <label htmlFor="enableLocationCheck" style={{ cursor: 'pointer', margin: 0, fontWeight: '600' }}>
+                  Enable GPS Location Security (Anti-Spoof Check)
+                </label>
+              </div>
+
+              {enableLocationCheck && (
+                <div className="form-group" style={{ marginTop: '10px' }}>
+                  <label>Allowed Student Distance Radius (accuracy margin):</label>
+                  <select
+                    value={allowedRadius}
+                    onChange={(e) => setAllowedRadius(Number(e.target.value))}
+                  >
+                    <option value={50}>50 meters (Strict - Classroom only)</option>
+                    <option value={100}>100 meters (Standard - Recommended)</option>
+                    <option value={200}>200 meters (Relaxed - Campus area)</option>
+                    <option value={500}>500 meters (Wide Area)</option>
+                  </select>
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
                 <button onClick={enableAttendance} className="btn btn-success">
                   Confirm & Enable
